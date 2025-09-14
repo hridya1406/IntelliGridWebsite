@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Microgrid Dashboard - Grafana Style</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5; /* Grafana-like light background */
+        }
+        .panel {
+            background-color: white;
+            border-radius: 0.5rem;
+            border: 1px solid #e0e0e0;
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-green { background-color: #4CAF50; }
+        .status-yellow { background-color: #FFC107; }
+        .status-red { background-color: #F44336; }
+        
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Sidebar Styles */
+        .sidebar {
+            background-color: #1a1a1a;
+            transition: width 0.3s ease;
+        }
+        .sidebar-icon {
+            transition: all 0.2s ease;
+        }
+        .sidebar-icon:hover {
+            background-color: #333;
+            color: #66b2ff;
+        }
+        .sidebar-icon.active {
+             background-color: #0d6efd;
+             color: white;
+        }
+
+        /* Energy flow animation */
+        .flow-dot {
+            animation-iteration-count: infinite;
+            animation-timing-function: linear;
+            display: none;
+        }
+        .flow-dot.active {
+            display: block;
+        }
+        .view {
+            display: none;
+        }
+        .view.active {
+            display: block;
+        }
+    </style>
+</head>
+<body class="text-gray-800">
+
+    <div class="flex h-screen">
+        <!-- Sidebar -->
+        <aside class="sidebar w-16 flex flex-col items-center py-4 space-y-6">
+            <div class="text-blue-400">
+                <i data-lucide="bolt" class="h-8 w-8"></i>
+            </div>
+            <div id="sidebar-nav" class="flex flex-col items-center space-y-4 text-gray-400 w-full">
+                <a href="#" class="sidebar-icon p-3 rounded-lg active" data-view="dashboard" title="Dashboard"><i data-lucide="layout-dashboard" class="h-6 w-6"></i></a>
+                <a href="#" class="sidebar-icon p-3 rounded-lg" data-view="alerts" title="Alerts"><i data-lucide="siren" class="h-6 w-6"></i></a>
+                <a href="#" class="sidebar-icon p-3 rounded-lg" data-view="reports" title="Reports"><i data-lucide="bar-chart-3" class="h-6 w-6"></i></a>
+                <a href="#" class="sidebar-icon p-3 rounded-lg" data-view="settings" title="Settings"><i data-lucide="settings" class="h-6 w-6"></i></a>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <div class="flex-1 flex flex-col overflow-y-auto">
+            <!-- Header -->
+            <header class="bg-white shadow-sm w-full p-4 flex justify-between items-center sticky top-0 z-10 border-b border-gray-200">
+                <h1 id="header-title" class="text-xl md:text-2xl font-bold">Microgrid Operations Dashboard</h1>
+                <div class="flex items-center space-x-2 text-sm text-gray-600">
+                    <i data-lucide="clock" class="h-4 w-4"></i>
+                    <span id="current-time"></span>
+                </div>
+            </header>
+
+            <!-- Dashboard View -->
+            <main id="dashboard-view" class="view active flex-1 p-4 md:p-6 lg:p-8">
+                <div class="grid grid-cols-12 gap-6">
+
+                    <!-- Generation/Load/Status Cards -->
+                    <div class="col-span-12 lg:col-span-3 panel p-4">
+                        <h3 class="font-semibold text-gray-500 text-sm mb-2">GENERATION</h3>
+                        <div class="flex items-center space-x-2">
+                           <i data-lucide="sun" class="h-7 w-7 text-yellow-500"></i>
+                           <p class="text-3xl font-bold"><span id="total-generation">...</span> kW</p>
+                        </div>
+                    </div>
+                     <div class="col-span-12 lg:col-span-3 panel p-4">
+                        <h3 class="font-semibold text-gray-500 text-sm mb-2">GRID LOAD</h3>
+                        <div class="flex items-center space-x-2">
+                           <i data-lucide="server" class="h-7 w-7 text-green-500"></i>
+                           <p class="text-3xl font-bold"><span id="current-load">...</span> kW</p>
+                        </div>
+                    </div>
+                    <div class="col-span-12 lg:col-span-6 panel p-4">
+                         <h3 class="font-semibold text-gray-500 text-sm mb-2">OVERALL STATUS</h3>
+                         <div class="flex items-center space-x-3">
+                            <span id="grid-status-dot" class="status-dot"></span>
+                            <span id="grid-status-text" class="text-3xl font-bold">...</span>
+                            <span id="grid-status-subtext" class="text-gray-500 mt-1"></span>
+                        </div>
+                    </div>
+                    
+                    <!-- Battery Gauge -->
+                    <div class="col-span-12 md:col-span-6 lg:col-span-3 panel p-4 flex flex-col items-center">
+                        <h3 class="font-semibold text-gray-500 text-sm mb-2 w-full text-center">BATTERY SOC</h3>
+                        <div class="relative w-full h-48">
+                            <canvas id="battery-gauge"></canvas>
+                            <div id="battery-gauge-text" class="absolute inset-0 flex items-center justify-center text-4xl font-bold">...%</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Main Time Series Chart -->
+                    <div class="col-span-12 md:col-span-6 lg:col-span-9 panel p-4">
+                         <h3 class="font-semibold text-gray-500 text-sm mb-2">ENERGY TRENDS (LAST 30 MIN)</h3>
+                         <div class="h-56">
+                            <canvas id="energyChart"></canvas>
+                         </div>
+                    </div>
+
+                    <!-- Energy Flow -->
+                    <div class="col-span-12 lg:col-span-5 panel p-4">
+                        <h3 class="font-semibold text-gray-500 text-sm mb-4 text-center">LIVE ENERGY FLOW</h3>
+                        <div class="flex justify-center items-center h-64">
+                             <svg width="100%" height="100%" viewBox="0 0 300 250">
+                                <defs><marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#4a5568"/></marker></defs>
+                                <path id="path-gen-center" d="M 50 125 L 140 125" stroke="#cbd5e1" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+                                <path id="path-center-load" d="M 160 125 L 250 125" stroke="#cbd5e1" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+                                <path id="path-center-batt" d="M 150 135 L 150 200" stroke="#cbd5e1" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+                                <path id="path-batt-center" d="M 150 200 L 150 135" stroke="#cbd5e1" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+                                <g>
+                                    <circle cx="50" cy="125" r="25" fill="#fef9c3"/><i-lucide name="sun" x="38" y="113" class="text-yellow-600"/>
+                                    <text x="50" y="160" font-size="12" fill="currentColor" text-anchor="middle">Generation</text>
+                                    <text x="50" y="172" font-size="12" fill="currentColor" text-anchor="middle">Source</text>
+                                </g>
+                                <g>
+                                    <circle cx="250" cy="125" r="25" fill="#dcfce7"/><i-lucide name="home" x="238" y="113" class="text-green-600"/>
+                                    <text x="250" y="160" font-size="12" fill="currentColor" text-anchor="middle">Grid</text>
+                                    <text x="250" y="172" font-size="12" fill="currentColor" text-anchor="middle">Load</text>
+                                </g>
+                                <g>
+                                    <circle cx="150" cy="225" r="25" fill="#dbeafe"/><i-lucide name="battery-full" x="138" y="213" class="text-blue-600"/>
+                                     <text x="150" y="95" font-size="12" fill="currentColor" text-anchor="middle">Battery</text>
+                                     <text x="150" y="107" font-size="12" fill="currentColor" text-anchor="middle">Storage</text>
+                                </g>
+                                <circle id="dot-gen-load" class="flow-dot" r="4" fill="#38a169"><animateMotion dur="3s" repeatCount="indefinite" path="M 50 125 L 250 125"/></circle>
+                                <circle id="dot-to-batt" class="flow-dot" r="4" fill="#4299e1"><animateMotion dur="2s" repeatCount="indefinite" path="M 150 125 L 150 225"/></circle>
+                                <circle id="dot-from-batt" class="flow-dot" r="4" fill="#e53e3e"><animateMotion dur="2s" repeatCount="indefinite" path="M 150 225 L 150 125"/></circle>
+                            </svg>
+                        </div>
+                    </div>
+                    
+                    <div class="col-span-12 lg:col-span-7 panel p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                             <h3 class="font-semibold text-gray-500 text-sm mb-2">EDGE DEVICE STATUS</h3>
+                             <div id="asset-health-grid" class="space-y-3"></div>
+                        </div>
+                        <div>
+                             <h3 class="font-semibold text-gray-500 text-sm mb-2">ALERTS & EVENTS LOG</h3>
+                             <div id="alerts-log" class="space-y-3 h-64 overflow-y-auto pr-2"></div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+
+            <!-- Alerts View -->
+            <main id="alerts-view" class="view flex-1 p-4 md:p-6 lg:p-8">
+                <div class="panel p-6">
+                    <h2 class="text-2xl font-bold mb-4">Detailed Alert History</h2>
+                    <div id="full-alerts-log" class="space-y-4">
+                        <p class="text-gray-500">No alerts have been generated yet.</p>
+                    </div>
+                </div>
+            </main>
+
+            <!-- Reports View -->
+            <main id="reports-view" class="view flex-1 p-4 md:p-6 lg:p-8">
+                 <div class="panel p-6 text-center">
+                    <i data-lucide="bar-chart-3" class="h-16 w-16 mx-auto text-gray-300 mb-4"></i>
+                    <h2 class="text-2xl font-bold mb-2">Reports & Analytics</h2>
+                    <p class="text-gray-500">This section will contain detailed performance reports, historical data analysis, and compliance documentation. (Coming Soon)</p>
+                </div>
+            </main>
+
+            <!-- Settings View -->
+            <main id="settings-view" class="view flex-1 p-4 md:p-6 lg:p-8">
+                <div class="panel p-6 max-w-2xl mx-auto">
+                    <h2 class="text-2xl font-bold mb-6">System Settings</h2>
+                    <div class="space-y-6">
+                        <div>
+                            <h3 class="font-semibold mb-2">Notification Preferences</h3>
+                            <div class="space-y-2">
+                                <label class="flex items-center space-x-3"><input type="checkbox" class="h-4 w-4 rounded" checked><span>Email alerts for critical faults</span></label>
+                                <label class="flex items-center space-x-3"><input type="checkbox" class="h-4 w-4 rounded"><span>SMS alerts for critical faults</span></label>
+                                <label class="flex items-center space-x-3"><input type="checkbox" class="h-4 w-4 rounded" checked><span>Push notifications for warnings</span></label>
+                            </div>
+                        </div>
+                        <div class="border-t pt-6">
+                            <h3 class="font-semibold mb-2">Theme</h3>
+                            <div class="flex space-x-2">
+                                <button class="px-4 py-2 rounded-md bg-blue-600 text-white font-semibold">Light</button>
+                                <button class="px-4 py-2 rounded-md bg-gray-200 text-gray-700">Dark</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        // --- Navigation Logic ---
+        const sidebarNav = document.getElementById('sidebar-nav');
+        const views = document.querySelectorAll('.view');
+        const headerTitle = document.getElementById('header-title');
+
+        sidebarNav.addEventListener('click', (e) => {
+            const link = e.target.closest('a');
+            if (!link) return;
+            e.preventDefault();
+
+            const viewName = link.dataset.view;
+            
+            // Update active icon
+            sidebarNav.querySelector('.active').classList.remove('active');
+            link.classList.add('active');
+
+            // Update header title
+            headerTitle.textContent = link.title;
+
+            // Switch views
+            views.forEach(view => {
+                view.classList.remove('active');
+                if (view.id === ${viewName}-view) {
+                    view.classList.add('active');
+                }
+            });
+        });
+
+        // --- Chart & Gauge Config ---
+        const batteryGauge = new Chart(document.getElementById('battery-gauge').getContext('2d'), {
+            type: 'doughnut', data: { datasets: [{ data: [0, 100], backgroundColor: ['#4CAF50', '#e0e0e0'], borderWidth: 0, circumference: 270, rotation: -135 }] },
+            options: { responsive: true, maintainAspectRatio: false, cutout: '80%', plugins: { tooltip: { enabled: false } } }
+        });
+        const energyChart = new Chart(document.getElementById('energyChart').getContext('2d'), {
+            type: 'line', data: { labels: [], datasets: [{ label: 'Generation', data: [], borderColor: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.1)', fill: true, tension: 0.4, pointRadius: 0 }, { label: 'Load', data: [], borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.1)', fill: true, tension: 0.4, pointRadius: 0 }] },
+            options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, grid: { color: '#e5e7eb' } }, x: { grid: { display: false } } }, plugins: { legend: { display: false } } }
+        });
+        
+        // --- Data Simulation & State ---
+        let generation = 150, load = 120, batterySOC = 80;
+        let gridStatus = 'Normal', isFaultCondition = false, faultCooldown = 0;
+        const alertsLog = document.getElementById('alerts-log');
+        const fullAlertsLog = document.getElementById('full-alerts-log');
+        let assets = [
+            { id: 'Gateway-ESP32', status: 'Normal', icon: 'wifi' }, { id: 'Processor-Pi4', status: 'Normal', icon: 'cpu' },
+            { id: 'Inverter-A1', status: 'Normal', icon: 'server' }, { id: 'Battery-P1', status: 'Normal', icon: 'battery-medium' }
+        ];
+
+        const dotGenLoad = document.getElementById('dot-gen-load');
+        const dotToBatt = document.getElementById('dot-to-batt');
+        const dotFromBatt = document.getElementById('dot-from-batt');
+
+        // --- UI Update Functions ---
+        const addAlert = (type, message) => {
+            const colors = { Predictive: 'border-yellow-400 bg-yellow-50', Fault: 'border-red-500 bg-red-50', System: 'border-blue-400 bg-blue-50' };
+            const icons = { Predictive: 'alert-triangle', Fault: 'siren', System: 'info' };
+            const alertEl = document.createElement('div');
+            alertEl.className = fade-in p-2 border-l-4 ${colors[type]} rounded-r-md flex items-start space-x-2 text-sm;
+            alertEl.innerHTML = <i data-lucide="${icons[type]}" class="h-4 w-4 mt-0.5"></i><div><p>${message}</p><p class="text-xs text-gray-400">${new Date().toLocaleString()}</p></div>;
+            
+            // Add to both logs
+            const fullLogClone = alertEl.cloneNode(true);
+            
+            if (alertsLog.querySelector('p')) alertsLog.innerHTML = '';
+            alertsLog.prepend(alertEl);
+            if (alertsLog.children.length > 6) alertsLog.removeChild(alertsLog.lastChild);
+
+            if (fullAlertsLog.querySelector('p')) fullAlertsLog.innerHTML = '';
+            fullAlertsLog.prepend(fullLogClone);
+            
+            lucide.createIcons();
+        };
+
+        const renderAssetHealth = () => {
+            const grid = document.getElementById('asset-health-grid');
+            if (!grid) return; // Don't run if the element is not on the current view
+            grid.innerHTML = '';
+            const statusClasses = { Normal: 'green', Warning: 'yellow', Fault: 'red' };
+            assets.forEach(asset => {
+                const statusColor = statusClasses[asset.status];
+                const el = document.createElement('div');
+                el.className = 'flex items-center justify-between p-2 bg-gray-50 rounded-md border';
+                el.innerHTML = <div class="flex items-center space-x-2"><i data-lucide="${asset.icon}" class="h-5 w-5 text-gray-600"></i><p class="font-medium text-sm">${asset.id}</p></div><div class="flex items-center space-x-2"><span class="text-xs">${asset.status}</span><span class="status-dot status-${statusColor}"></span></div>;
+                grid.appendChild(el);
+            });
+            lucide.createIcons();
+        };
+
+        const updateUI = () => {
+            // Simulate data fluctuations
+            if (faultCooldown > 0) faultCooldown--; else isFaultCondition = Math.random() < 0.05;
+            assets.forEach(asset => { if (asset.status !== 'Fault') asset.status = 'Normal'; });
+            if (isFaultCondition && faultCooldown === 0) {
+                gridStatus = 'Fault'; generation *= 0.3; let faultyAsset = assets[2]; faultyAsset.status = 'Fault';
+                addAlert('Fault', ${faultyAsset.id} reported undervoltage.); faultCooldown = 15;
+            } else if (!isFaultCondition && Math.random() < 0.08) {
+                gridStatus = 'Warning'; let warningAsset = assets[3]; warningAsset.status = 'Warning';
+                addAlert('Predictive', ${warningAsset.id} high temp detected.);
+            } else if (!isFaultCondition) { gridStatus = 'Normal'; }
+
+            generation += (Math.random() - 0.45) * 10; load += (Math.random() - 0.5) * 8;
+            generation = Math.max(80, Math.min(250, generation)); load = Math.max(70, Math.min(200, load));
+            const netPower = generation - load;
+            batterySOC += netPower / 100; batterySOC = Math.max(0, Math.min(100, batterySOC));
+
+            // Update DOM (only if dashboard view is active)
+            if(document.getElementById('dashboard-view').classList.contains('active')) {
+                document.getElementById('total-generation').textContent = generation.toFixed(1);
+                document.getElementById('current-load').textContent = load.toFixed(1);
+                const statusDot = document.getElementById('grid-status-dot');
+                const statusText = document.getElementById('grid-status-text');
+                const statusSubText = document.getElementById('grid-status-subtext');
+                statusDot.className = 'status-dot'; // reset
+                if (gridStatus === 'Normal') { statusDot.classList.add('status-green'); statusText.textContent = 'Nominal'; statusSubText.textContent = 'All systems operational.'; } 
+                else if (gridStatus === 'Warning') { statusDot.classList.add('status-yellow'); statusText.textContent = 'Warning'; statusSubText.textContent = 'Potential issue detected.'; }
+                else { statusDot.classList.add('status-red'); statusText.textContent = 'Fault'; statusSubText.textContent = 'Critical error active.'; }
+
+                // Update flow
+                dotGenLoad.classList.toggle('active', generation > 0);
+                dotToBatt.classList.toggle('active', netPower > 10);
+                dotFromBatt.classList.toggle('active', netPower < -10);
+
+                // Update charts
+                batteryGauge.data.datasets[0].data[0] = batterySOC;
+                batteryGauge.data.datasets[0].data[1] = 100 - batterySOC;
+                const socColor = batterySOC > 50 ? '#4CAF50' : batterySOC > 20 ? '#FFC107' : '#F44336';
+                batteryGauge.data.datasets[0].backgroundColor[0] = socColor;
+                document.getElementById('battery-gauge-text').textContent = ${batterySOC.toFixed(0)}%;
+                batteryGauge.update('none');
+
+                const now = new Date();
+                energyChart.data.labels.push(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+                energyChart.data.datasets[0].data.push(generation.toFixed(1));
+                energyChart.data.datasets[1].data.push(load.toFixed(1));
+                if (energyChart.data.labels.length > 30) { energyChart.data.labels.shift(); energyChart.data.datasets.forEach(ds => ds.data.shift()); }
+                energyChart.update();
+                renderAssetHealth();
+            }
+            document.getElementById('current-time').textContent = new Date().toLocaleTimeString();
+
+        };
+        
+        // Initial setup and interval
+        updateUI();
+        setInterval(updateUI, 2500);
+    </script>
+</body>
+</html>
